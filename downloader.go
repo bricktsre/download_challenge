@@ -1,11 +1,11 @@
 package main
 
 import ( 
-	//"fmt"
+	"fmt"
 	"net/http"
 	"io"
 	"strconv"
-	//"sync"
+	"sync"
 	"os"
 	"errors"
 	"strings"
@@ -15,9 +15,17 @@ type downloader struct{
 	start int
 	end int
 	url string
-	filepath string
+	outfile	*os.File
 	err chan error
+	done chan error
+	fileLock sync.Mutex
 }
+
+type OffsetWriter struct{
+	file *os.File
+	offset int64
+}
+
 
 func main() {
 	url, numThreads, err := getArguments()
@@ -39,15 +47,50 @@ func main() {
 	if len(filepath) < 1 {
 		filepath = "file.txt"
 	}
+	
+	outFile, err := os.Create(filepath + ".tmp")
+	if err != nil {
+		panic(err)
+	}
+	defer outFile.Close()
 
 	chunkSize := fileLength / numThreads
-	lastChunk := fileLength % numThreads
-	lastChunk++	
+	//lastChunk := fileLength % numThreads
+	
+	downloadarr := make([]downloader, numThreads)	
+	errchan := make(chan error)
+	donechan := make(chan error)
+	for i := 0; i < numThreads; i++ {
+		downloadarr[i] = downloader{
+			start: i*chunkSize,
+			end: (i+1)*chunkSize,
+			url: url, 
+			outfile: outFile, 
+			err: errchan,
+			done: donechan,
+			fileLock: sync.Mutex{} }
+		if i == numThreads-1 {
+			downloadarr[i].end = fileLength
+		}
+		go downloadarr[i].download()
+	}
+	
+	count := 0
+	errorloop:for {
+		select {
+			case err = <-errchan:
+				panic(err)
+			case <- donechan:
+				count++
+				if count == numThreads {
+					break errorloop
+				}
+		}
+	}
 
-	testd := downloader{0,chunkSize, url, filepath, make(chan error, 1)}
-	go download(testd)
-	for e := range testd.err {
-		panic(e)
+	err = os.Rename(filepath + ".tmp", filepath)
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -68,24 +111,26 @@ func getArguments() (string, int, error) {
 	return url, numThreads, nil
 }
 
-func download(d downloader) {
-	defer close(d.err)
-		
-	out, err := os.Create(d.filepath + ".tmp")
-	if err != nil {
-		d.err <- err
-		return
+func (dst *OffsetWriter) Write(b []byte) (n int, err error) {
+	if dst.offset == 13292 {
+		fmt.Printf("%x %x\n",b[0] ,b[1])
 	}
-	defer out.Close()
+	n, err = dst.file.WriteAt(b, dst.offset)
+	dst.offset += int64(n)
+	fmt.Println(dst.offset-int64(n), len(b), n)
+	return	
+}
 
+func (d downloader) download() {	
 	client := &http.Client {}
 	req, err := http.NewRequest("GET", d.url, nil)
 	if err != nil {
 		d.err <- err
 		return
 	}
-	req.Header.Add("Range", "bytes=" + strconv.Itoa(d.start) + "-" + strconv.Itoa(d.end-1))
-	
+	range_header := "bytes=" + strconv.Itoa(d.start) + "-" + strconv.Itoa(d.end-1)
+	req.Header.Add("Range", range_header)
+	fmt.Println(range_header)	
 	resp, err := client.Do(req)
 	if err != nil {
 		d.err <- err
@@ -93,15 +138,40 @@ func download(d downloader) {
 	}
 	defer resp.Body.Close()
 	
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
+	err = d.writeOut(resp.Body)
+	/*writer := &OffsetWriter{file: d.outfile, offset: int64(d.start)}
+	d.fileLock.Lock()
+	fmt.Println("going to write")
+	_, err = io.Copy(d.outfile, io.TeeReader(resp.Body, writer))
+	d.fileLock.Unlock()
+	*/if err != nil {
 		d.err <- err
 		return
 	}
-	
-	err = os.Rename(d.filepath + ".tmp", d.filepath)
-	if err != nil {
-		d.err <- err
-		return
+	d.done <- nil	
+}
+
+func (d downloader) writeOut(body io.ReadCloser) error {
+	buf := make([]byte, 4*1024)
+	for {
+		br, err := body.Read(buf)
+		if br > 0 {
+			bw, err := d.outfile.WriteAt(buf[0:br], int64(d.start))
+			if err != nil {
+				return err
+			}
+			if br != bw {
+				errors.New("Not all bytes read were written")
+			}
+
+			d.start = bw + d.start
+		}
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			return err
+		}
 	}
+	return nil
 }
