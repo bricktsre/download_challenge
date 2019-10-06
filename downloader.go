@@ -18,14 +18,7 @@ type downloader struct{
 	outfile	*os.File
 	err chan error
 	done chan error
-	fileLock sync.Mutex
 }
-
-type OffsetWriter struct{
-	file *os.File
-	offset int64
-}
-
 
 func main() {
 	url, numThreads, err := getArguments()
@@ -55,7 +48,6 @@ func main() {
 	defer outFile.Close()
 
 	chunkSize := fileLength / numThreads
-	//lastChunk := fileLength % numThreads
 	
 	downloadarr := make([]downloader, numThreads)	
 	errchan := make(chan error)
@@ -68,7 +60,6 @@ func main() {
 			outfile: outFile, 
 			err: errchan,
 			done: donechan,
-			fileLock: sync.Mutex{} }
 		if i == numThreads-1 {
 			downloadarr[i].end = fileLength
 		}
@@ -111,16 +102,6 @@ func getArguments() (string, int, error) {
 	return url, numThreads, nil
 }
 
-func (dst *OffsetWriter) Write(b []byte) (n int, err error) {
-	if dst.offset == 13292 {
-		fmt.Printf("%x %x\n",b[0] ,b[1])
-	}
-	n, err = dst.file.WriteAt(b, dst.offset)
-	dst.offset += int64(n)
-	fmt.Println(dst.offset-int64(n), len(b), n)
-	return	
-}
-
 func (d downloader) download() {	
 	client := &http.Client {}
 	req, err := http.NewRequest("GET", d.url, nil)
@@ -130,7 +111,7 @@ func (d downloader) download() {
 	}
 	range_header := "bytes=" + strconv.Itoa(d.start) + "-" + strconv.Itoa(d.end-1)
 	req.Header.Add("Range", range_header)
-	fmt.Println(range_header)	
+	
 	resp, err := client.Do(req)
 	if err != nil {
 		d.err <- err
@@ -139,12 +120,7 @@ func (d downloader) download() {
 	defer resp.Body.Close()
 	
 	err = d.writeOut(resp.Body)
-	/*writer := &OffsetWriter{file: d.outfile, offset: int64(d.start)}
-	d.fileLock.Lock()
-	fmt.Println("going to write")
-	_, err = io.Copy(d.outfile, io.TeeReader(resp.Body, writer))
-	d.fileLock.Unlock()
-	*/if err != nil {
+	if err != nil {
 		d.err <- err
 		return
 	}
