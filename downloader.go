@@ -1,12 +1,14 @@
 package main
 
 import ( 
+	"fmt"
 	"net/http"
 	"io"
 	"strconv"
 	"os"
 	"errors"
 	"strings"
+	"github.com/dustin/go-humanize"
 )
 
 // Holds information necessary for a individual goroutine to download a chunk of a file
@@ -16,7 +18,7 @@ type downloader struct{
 	url string
 	outfile	*os.File
 	err chan error
-	done chan error
+	done chan int
 }
 
 /*
@@ -37,12 +39,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Established a connection to:", url)
+	fmt.Println("File size: ", humanize.Bytes(uint64(fileLength)))
 	
 	filepath := url[strings.LastIndex(url, "/")+1: len(url)]  // parse name to use for downloaded file
 	if len(filepath) < 1 {
 		filepath = "file.txt"
 	}
-	
+	fmt.Println("Saving file as: ", filepath);	
+
 	outFile, err := os.Create(filepath + ".tmp")   // create a temporary file to write downloaded chunks into
 	if err != nil {
 		panic(err)
@@ -53,7 +58,8 @@ func main() {
 	
 	downloadarr := make([]downloader, numThreads)	// array holding each goroutine
 	errchan := make(chan error)
-	donechan := make(chan error)
+	donechan := make(chan int)
+	fmt.Println("Download Starting")
 	for i := 0; i < numThreads; i++ {
 		downloadarr[i] = downloader{ 		// create a download worker
 			start: i*chunkSize,
@@ -69,13 +75,15 @@ func main() {
 		go downloadarr[i].download()		// start the download goroutine
 	}
 	
-	count := 0
+	count, download_amt := 0, 0
 	errorloop:for {		// loop waiting for all goroutines to finish
 		select {
 			case err = <-errchan:
 				panic(err)	// panic if a goroutine sends an error
-			case <- donechan:
+			case amt := <- donechan:
 				count++		// a goroutine has signalled it is done so increment count of finished goroutines
+				download_amt += amt
+				fmt.Println("Downlading...",humanize.Bytes(uint64(download_amt)),"complete")
 				if count == numThreads {
 					break errorloop	  // If all goroutines are done break out of loop
 				}
@@ -86,6 +94,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Download finished")
 }
 
 /*
@@ -139,7 +148,7 @@ func (d downloader) download() {
 		d.err <- err
 		return
 	}
-	d.done <- nil		// signal main process this goroutine is done
+	d.done <- (d.end-d.start)		// signal main process this goroutine is done
 }
 
 /* 
