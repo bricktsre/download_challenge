@@ -1,0 +1,27 @@
+Command Line File Downloader
+
+Installation and Usage:
+	downloader is a executable binary that can be run from the command line
+	This executable can be remade by running go build downloader.go with the go 
+	source files	
+
+	You can also go run downloader.go with the necessary arguments
+
+	./downloader <url> -c nThreads
+	
+	url: a valid url of a file to be downloaded
+	nThreads: number of threads to use to concurrently download the file
+
+	downloader_test.go contains some simple tests. Can be ran with go tests
+	
+Design Choices:
+	I wrote this in go since threading is relatively easy and it is straightforward to make
+	an executable in go
+	Each thread or goroutine in golang is responsible for downloading a chunk of the file. The
+	chunk size is determined by filesize divide by the number of threads. Once the goroutine has
+	gotten its chunk it writes it out to a shared file at an offset.
+
+Bottlenecks:
+	The largest bottleneck is the need to read the downloaded chunk into memory before writing it
+	out to disk. Other than that the biggest bottleneck would be the system's download speed 
+	which is outside of my control
