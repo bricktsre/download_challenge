@@ -25,7 +25,7 @@ type downloader struct{
   Downloads a file from a given url concurrently using one or more threads
 */
 func main() {
-	url, numThreads, err := getArguments()
+	url, numThreads, err := getArguments(os.Args)
 	if err != nil {
 		panic(err)
 	}
@@ -103,17 +103,17 @@ func main() {
    int: number of threads to use
    error: error if one occured, nil otherwise
 */
-func getArguments() (string, int, error) {
-	if len(os.Args) < 4 || len(os.Args) > 5{
+func getArguments(args []string) (string, int, error) {
+	if len(args) < 4 || len(args) > 5{
 		return "", 0, errors.New("Proper usage: ./downloader <url> -c numberOfThreads")
 			
 	}
-	url := os.Args[1]
+	url := args[1]
 	
-	if os.Args[2] != "-c" {
+	if args[2] != "-c" {
 		return "", 0, errors.New("Proper usage: ./downloader <url> -c numberOfThreads")
 	}
-	numThreads, err := strconv.Atoi(os.Args[3])
+	numThreads, err := strconv.Atoi(args[3])
 	if err != nil { 
 		return "", 0, err
 	}
